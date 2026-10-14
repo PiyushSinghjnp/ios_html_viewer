@@ -88,6 +88,8 @@ let wakeLockSentinel = null;
 let searchQuery = '';
 let sortPreference = localStorage.getItem('mocktest_sort_pref') || 'recent';
 let isDeleteInProgress = false;
+let isRenameInProgress = false;
+let isImportInProgress = false;
 let currentModalResolver = null;
 
 /* ==========================================================================
@@ -304,6 +306,26 @@ export function patchTestHtml(originalHtml) {
           return Promise.resolve();
         };
       }
+
+      // Non-blocking safe stubs for alert, confirm, prompt to prevent Safari UI freezes
+      window.alert = function(msg) {
+        console.log('[Test Alert]', msg);
+        try {
+          if (window.parent && typeof window.parent.showToast === 'function') {
+            window.parent.showToast(String(msg), 'info', 4000);
+          }
+        } catch (e) {}
+      };
+
+      window.confirm = function(msg) {
+        console.log('[Test Confirm - auto accepted]', msg);
+        return true;
+      };
+
+      window.prompt = function(msg, defaultText) {
+        console.log('[Test Prompt - default returned]', msg);
+        return defaultText || '';
+      };
     })();
   <\/script>
   `;
@@ -371,14 +393,18 @@ async function releaseWakeLock() {
 export function normalizeHtml(rawText) {
   if (!rawText) return '';
   let text = rawText;
-  if (text.charCodeAt(0) === 0xFEFF) {
+  // Handle UTF-8 BOM (\uFEFF or \uFFFE)
+  if (text.charCodeAt(0) === 0xFEFF || text.charCodeAt(0) === 0xFFFE) {
     text = text.slice(1);
   }
+  // Normalize CRLF and CR to LF
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   return text;
 }
 
 export function extractTitleFromHtml(html, fallbackName = 'Untitled Test') {
-  if (!html) return fallbackName;
+  const safeFallback = (typeof fallbackName === 'string' && fallbackName.trim().length > 0) ? fallbackName.trim() : 'Untitled Test';
+  if (!html) return safeFallback;
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (match && match[1]) {
     const decoded = match[1]
@@ -390,55 +416,81 @@ export function extractTitleFromHtml(html, fallbackName = 'Untitled Test') {
       .trim();
     if (decoded.length > 0) return decoded;
   }
-  return fallbackName;
+  return safeFallback;
 }
 
 /* ==========================================================================
    Import Workflow (Files & Paste)
    ========================================================================== */
 async function handleFileSelection(files) {
-  if (!files || files.length === 0) return;
+  if (!files || files.length === 0 || isImportInProgress) return;
+  isImportInProgress = true;
 
-  closeSheet(elements.sheetImport);
-  let importedCount = 0;
-  let totalBytes = 0;
+  try {
+    closeSheet(elements.sheetImport);
+    let importedCount = 0;
+    let totalBytes = 0;
 
-  for (const file of Array.from(files)) {
-    if (file.size > 20 * 1024 * 1024) {
-      const proceed = await showModal({
-        title: 'Large file warning',
-        body: `"${file.name}" is ${formatBytes(file.size)}. Importing files over 20 MB may consume significant memory on iOS Safari. Do you want to continue?`,
-        buttons: [
-          { text: 'Import anyway', className: 'btn-primary', value: true },
-          { text: 'Skip file', className: 'btn-secondary', value: false }
-        ]
-      });
-
-      if (!proceed) continue;
-    }
-
-    try {
-      const rawText = await file.text();
-      const html = normalizeHtml(rawText);
-      const fallbackName = file.name.replace(/\.[^/.]+$/, '');
-      const title = extractTitleFromHtml(html, fallbackName);
-
-      const saved = await saveImportedTest(title, html, file.size);
-      if (saved) {
-        importedCount++;
-        totalBytes += file.size;
+    for (const file of Array.from(files)) {
+      // 1. Empty file detection
+      if (file.size === 0) {
+        showToast(`"${file.name}" is empty (0 bytes). Skipped.`, 'warning', 3500);
+        continue;
       }
-    } catch (err) {
-      console.error('[Import] Failed to read file:', file.name, err);
-      showToast(`Failed to import "${file.name}": ${err.message}`, 'error', 4000);
+
+      // 2. Large file size warnings (50 MB & 20 MB thresholds)
+      if (file.size > 50 * 1024 * 1024) {
+        const proceed = await showModal({
+          title: 'Very large file warning',
+          body: `"${file.name}" is ${formatBytes(file.size)}. Files over 50 MB may exceed iOS Safari memory limits and crash your browser tab. Do you want to proceed?`,
+          buttons: [
+            { text: 'Import anyway', className: 'btn-danger', value: true },
+            { text: 'Skip file', className: 'btn-secondary', value: false }
+          ]
+        });
+        if (!proceed) continue;
+      } else if (file.size > 20 * 1024 * 1024) {
+        const proceed = await showModal({
+          title: 'Large file warning',
+          body: `"${file.name}" is ${formatBytes(file.size)}. Importing files over 20 MB may consume significant memory on iOS Safari. Do you want to continue?`,
+          buttons: [
+            { text: 'Import anyway', className: 'btn-primary', value: true },
+            { text: 'Skip file', className: 'btn-secondary', value: false }
+          ]
+        });
+        if (!proceed) continue;
+      }
+
+      try {
+        const rawText = await file.text();
+        if (!rawText || rawText.trim().length === 0) {
+          showToast(`"${file.name}" has no text content. Skipped.`, 'warning', 3500);
+          continue;
+        }
+
+        const html = normalizeHtml(rawText);
+        const fallbackName = file.name.replace(/\.[^/.]+$/, '').trim() || 'Untitled Test';
+        const title = extractTitleFromHtml(html, fallbackName);
+
+        const saved = await saveImportedTest(title, html, file.size);
+        if (saved) {
+          importedCount++;
+          totalBytes += file.size;
+        }
+      } catch (err) {
+        console.error('[Import] Failed to read file:', file.name, err);
+        showToast(`Failed to import "${file.name}": ${err.message}`, 'error', 4000);
+      }
     }
-  }
 
-  elements.filePicker.value = '';
+    elements.filePicker.value = '';
 
-  if (importedCount > 0) {
-    showToast(`Imported ${importedCount} ${importedCount === 1 ? 'test' : 'tests'} (${formatBytes(totalBytes)})`, 'success');
-    await refreshLibrary();
+    if (importedCount > 0) {
+      showToast(`Imported ${importedCount} ${importedCount === 1 ? 'test' : 'tests'} (${formatBytes(totalBytes)})`, 'success');
+      await refreshLibrary();
+    }
+  } finally {
+    isImportInProgress = false;
   }
 }
 
@@ -576,61 +628,68 @@ function getAttemptStatus(testName) {
    Test Management (Rename & Delete with History Cleanup)
    ========================================================================== */
 async function promptRenameTest(test) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'form-group';
-  wrapper.style.margin = '4px 0 0';
+  if (isRenameInProgress) return;
+  isRenameInProgress = true;
 
-  const label = document.createElement('label');
-  label.className = 'form-label';
-  label.textContent = 'Enter new test title';
-  label.htmlFor = 'modal-rename-input';
+  try {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'form-group';
+    wrapper.style.margin = '4px 0 0';
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.id = 'modal-rename-input';
-  input.className = 'form-input';
-  input.value = test.name;
-  input.autocomplete = 'off';
-  input.autocapitalize = 'sentences';
-  input.style.fontSize = '16px'; // Prevents Safari auto-zoom
+    const label = document.createElement('label');
+    label.className = 'form-label';
+    label.textContent = 'Enter new test title';
+    label.htmlFor = 'modal-rename-input';
 
-  wrapper.appendChild(label);
-  wrapper.appendChild(input);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'modal-rename-input';
+    input.className = 'form-input';
+    input.value = test.name;
+    input.autocomplete = 'off';
+    input.autocapitalize = 'sentences';
+    input.style.fontSize = '16px'; // Prevents Safari auto-zoom
 
-  let submittedName = null;
+    wrapper.appendChild(label);
+    wrapper.appendChild(input);
 
-  const result = await showModal({
-    title: 'Rename test',
-    body: wrapper,
-    buttons: [
-      {
-        text: 'Save name',
-        className: 'btn-primary',
-        onClick: () => {
-          const val = input.value.trim();
-          if (!val) {
-            showToast('Please enter a test title.', 'warning');
-            input.focus();
-            return false;
-          }
-          submittedName = val;
-          return true;
+    let submittedName = null;
+
+    const result = await showModal({
+      title: 'Rename test',
+      body: wrapper,
+      buttons: [
+        {
+          text: 'Save name',
+          className: 'btn-primary',
+          onClick: () => {
+            const val = input.value.trim();
+            if (!val) {
+              showToast('Please enter a test title.', 'warning');
+              input.focus();
+              return false;
+            }
+            submittedName = val;
+            return true;
+          },
+          value: true
         },
-        value: true
-      },
-      { text: 'Cancel', className: 'btn-secondary', value: false }
-    ]
-  });
+        { text: 'Cancel', className: 'btn-secondary', value: false }
+      ]
+    });
 
-  if (result && submittedName && submittedName !== test.name) {
-    try {
-      await renameTest(test.id, submittedName);
-      showToast(`Renamed to "${submittedName}"`, 'success');
-      await refreshLibrary();
-    } catch (err) {
-      console.error('[Rename] Error:', err);
-      showToast(`Failed to rename test: ${err.message}`, 'error');
+    if (result && submittedName && submittedName !== test.name) {
+      try {
+        await renameTest(test.id, submittedName);
+        showToast(`Renamed to "${submittedName}"`, 'success');
+        await refreshLibrary();
+      } catch (err) {
+        console.error('[Rename] Error:', err);
+        showToast(`Failed to rename test: ${err.message}`, 'error');
+      }
     }
+  } finally {
+    isRenameInProgress = false;
   }
 }
 
@@ -781,6 +840,8 @@ function renderLibrary() {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
+
   filtered.forEach((test) => {
     const card = document.createElement('article');
     card.className = 'test-card';
@@ -850,8 +911,10 @@ function renderLibrary() {
       promptDeleteTest(test);
     });
 
-    elements.testList.appendChild(card);
+    fragment.appendChild(card);
   });
+
+  elements.testList.appendChild(fragment);
 }
 
 function escapeHtml(str) {

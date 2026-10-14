@@ -188,8 +188,8 @@ input, textarea, select, button {
   flex-shrink: 0;
   padding-top: max(var(--sat), 12px);
   padding-bottom: 12px;
-  padding-left: 16px;
-  padding-right: 16px;
+  padding-left: max(16px, var(--sal));
+  padding-right: max(16px, var(--sar));
   background-color: var(--bg-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -412,7 +412,7 @@ input, textarea, select, button {
 #view-library {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 16px calc(var(--sab) + 20px) 16px;
+  padding: 16px max(16px, var(--sar)) calc(var(--sab) + 20px) max(16px, var(--sal));
 }
 
 /* Search and Controls Bar (Phase 4 Ready) */
@@ -714,8 +714,8 @@ input, textarea, select, button {
   flex-shrink: 0;
   padding-top: max(var(--sat), 8px);
   padding-bottom: 8px;
-  padding-left: 12px;
-  padding-right: 12px;
+  padding-left: max(12px, var(--sal));
+  padding-right: max(12px, var(--sar));
   background-color: var(--bg-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
