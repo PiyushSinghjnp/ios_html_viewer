@@ -78,6 +78,7 @@ const elements = {
 // Global App State
 let currentTests = [];
 let activeTestId = null;
+let wakeLockSentinel = null;
 
 /* ==========================================================================
    Theme Management (Light / Dark / Auto)
@@ -233,12 +234,115 @@ export function switchView(target) {
 }
 
 /* ==========================================================================
+   Patch-on-Open & Safety Injection
+   ========================================================================== */
+/**
+ * In-memory patch injected right after <head>
+ * Original test HTML in IndexedDB is never modified.
+ */
+export function patchTestHtml(originalHtml) {
+  if (!originalHtml) return '';
+
+  const patchBlock = `
+  <!-- Mock Test Viewer Patch-on-Open -->
+  <style id="viewer-patch-styles">
+    /* Fix dashboard box 400px overflow on iPhone 15 (393pt screen) */
+    .box, .wc {
+      max-width: 92vw !important;
+      width: auto !important;
+      box-sizing: border-box !important;
+    }
+    /* Smooth iOS scrolling */
+    html, body {
+      -webkit-overflow-scrolling: touch !important;
+      overscroll-behavior-y: contain !important;
+    }
+  </style>
+  <script id="viewer-patch-scripts">
+    (function() {
+      // Stub documentElement.requestFullscreen for iPhone Safari
+      if (!document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen = function() {
+          return Promise.resolve();
+        };
+      }
+      if (!document.requestFullscreen) {
+        document.requestFullscreen = function() {
+          return Promise.resolve();
+        };
+      }
+      if (!document.exitFullscreen) {
+        document.exitFullscreen = function() {
+          return Promise.resolve();
+        };
+      }
+    })();
+  <\/script>
+  `;
+
+  // Inject right after <head> or <head ...>
+  if (/<head[^>]*>/i.test(originalHtml)) {
+    return originalHtml.replace(/(<head[^>]*>)/i, `$1\n${patchBlock}`);
+  }
+
+  // Fallback: prepend if no <head> tag exists
+  return patchBlock + '\n' + originalHtml;
+}
+
+/**
+ * Trigger window.saveProgress() inside the test iframe safely
+ */
+function callSaveProgress() {
+  try {
+    if (elements.testIframe && elements.testIframe.contentWindow) {
+      if (typeof elements.testIframe.contentWindow.saveProgress === 'function') {
+        elements.testIframe.contentWindow.saveProgress();
+        console.log('[Reader] saveProgress() invoked successfully');
+      }
+    }
+  } catch (err) {
+    console.warn('[Reader] saveProgress() invocation error:', err);
+  }
+}
+
+/* ==========================================================================
+   Screen Wake Lock Management
+   ========================================================================== */
+async function acquireWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      if (wakeLockSentinel) {
+        await releaseWakeLock();
+      }
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => {
+        console.log('[WakeLock] Screen wake lock released');
+        wakeLockSentinel = null;
+      });
+      console.log('[WakeLock] Screen wake lock active');
+    } catch (err) {
+      console.warn('[WakeLock] Request failed:', err);
+    }
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    try {
+      await wakeLockSentinel.release();
+    } catch (err) {
+      console.warn('[WakeLock] Release error:', err);
+    }
+    wakeLockSentinel = null;
+  }
+}
+
+/* ==========================================================================
    HTML Parsing & Normalization
    ========================================================================== */
 export function normalizeHtml(rawText) {
   if (!rawText) return '';
   let text = rawText;
-  // Handle UTF-8 BOM
   if (text.charCodeAt(0) === 0xFEFF) {
     text = text.slice(1);
   }
@@ -272,7 +376,6 @@ async function handleFileSelection(files) {
   let totalBytes = 0;
 
   for (const file of Array.from(files)) {
-    // 20 MB size warning
     if (file.size > 20 * 1024 * 1024) {
       const proceed = await showModal({
         title: 'Large file warning',
@@ -312,7 +415,6 @@ async function handleFileSelection(files) {
 }
 
 async function saveImportedTest(title, html, size) {
-  // Check for duplicate title
   const existing = await getTestByName(title);
 
   if (existing) {
@@ -339,7 +441,6 @@ async function saveImportedTest(title, html, size) {
     }
 
     if (choice === 'keep-both') {
-      // Append timestamp or counter
       const newTitle = `${title} (${new Date().toLocaleDateString()})`;
       await saveTest({
         name: newTitle,
@@ -352,7 +453,6 @@ async function saveImportedTest(title, html, size) {
     }
   }
 
-  // Brand new test
   await saveTest({
     name: title,
     html,
@@ -416,10 +516,6 @@ function formatDate(timestamp) {
   });
 }
 
-/**
- * Determine attempt state based on sample test conventions:
- * localStorage key "MM_<title>" and "MM_InProg_<title>"
- */
 function getAttemptStatus(testName) {
   const keySuffix = testName.replace(/\s+/g, '_');
   const hasCompleted = localStorage.getItem(`MM_${keySuffix}`) !== null;
@@ -469,7 +565,6 @@ function renderLibrary() {
   elements.emptyState.classList.add('hidden');
   elements.testList.classList.remove('hidden');
 
-  // Controls shown when 6+ tests
   if (count >= 6) {
     elements.libraryControls.classList.remove('hidden');
   } else {
@@ -516,7 +611,6 @@ function renderLibrary() {
       </div>
     `;
 
-    // Click card to open in Reader (or trigger info in Phase 2)
     card.addEventListener('click', () => openTestInReader(test.id));
 
     elements.testList.appendChild(card);
@@ -537,7 +631,7 @@ function escapeHtml(str) {
 }
 
 /* ==========================================================================
-   Reader Launcher (Phase 2 & Phase 3 Bridge)
+   Reader Launcher (Phase 3 Full Implementation)
    ========================================================================== */
 export async function openTestInReader(testId) {
   const test = await getTestById(testId);
@@ -550,10 +644,15 @@ export async function openTestInReader(testId) {
   await updateTestLastOpened(test.id);
   elements.readerTitle.textContent = test.name;
 
-  // In Phase 2: Switch view and load test HTML into iframe
-  elements.testIframe.srcdoc = test.html;
+  // Apply patch-on-open in memory (CSS max-width + Safari fullscreen stub)
+  const patchedHtml = patchTestHtml(test.html);
+  elements.testIframe.srcdoc = patchedHtml;
+
+  // Request screen wake lock
+  await acquireWakeLock();
+
   switchView('reader');
-  showToast(`Opened "${test.name}"`, 'info');
+  showToast(`Starting "${test.name}"`, 'info');
 }
 
 /* ==========================================================================
@@ -575,7 +674,7 @@ async function updateSettingsStats() {
 }
 
 /* ==========================================================================
-   Initialization
+   Initialization & Event Wiring
    ========================================================================== */
 async function initApp() {
   // 1. Initialize Theme
@@ -641,7 +740,10 @@ async function initApp() {
     });
 
     if (confirmed) {
+      callSaveProgress();
+      await releaseWakeLock();
       elements.testIframe.srcdoc = '';
+      activeTestId = null;
       switchView('library');
       await refreshLibrary();
     }
@@ -657,18 +759,45 @@ async function initApp() {
       ]
     });
 
-    if (confirmed) {
-      if (activeTestId) {
-        const test = await getTestById(activeTestId);
-        if (test) {
-          elements.testIframe.srcdoc = test.html;
-          showToast('Restarted test', 'info');
-        }
+    if (confirmed && activeTestId) {
+      const test = await getTestById(activeTestId);
+      if (test) {
+        showToast('Restarting test...', 'warning');
+        // Clear srcdoc and re-apply patched HTML to guarantee a clean reset
+        elements.testIframe.srcdoc = '';
+        setTimeout(() => {
+          elements.testIframe.srcdoc = patchTestHtml(test.html);
+        }, 50);
       }
     }
   });
 
-  // 5. Initialize IndexedDB
+  // 5. Visibility & Safety Hooks (Progress saving & Wake Lock)
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'hidden') {
+      if (activeTestId) {
+        callSaveProgress();
+      }
+    } else if (document.visibilityState === 'visible') {
+      if (activeTestId) {
+        await acquireWakeLock();
+      }
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    if (activeTestId) {
+      callSaveProgress();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (activeTestId) {
+      callSaveProgress();
+    }
+  });
+
+  // 6. Initialize IndexedDB
   const dbStatus = await initDB();
   if (dbStatus.isFallback) {
     elements.storageBanner.classList.add('active');
@@ -677,10 +806,10 @@ async function initApp() {
     `;
   }
 
-  // 6. Initial Load of Tests
+  // 7. Initial Load of Tests
   await refreshLibrary();
 
-  console.log('Mock Test Viewer Phase 2 loaded successfully.');
+  console.log('Mock Test Viewer Phase 3 loaded successfully.');
 }
 
 document.addEventListener('DOMContentLoaded', initApp);
