@@ -734,11 +734,11 @@ body.in-reader #main-header,
   display: none !important;
 }
 
-#btn-reader-back,
-#btn-reader-restart {
+#btn-reader-back {
   pointer-events: auto;
   position: absolute;
   top: max(5px, var(--sat));
+  left: max(8px, var(--sal));
   height: 26px;
   min-height: 26px;
   padding: 0 10px;
@@ -760,30 +760,19 @@ body.in-reader #main-header,
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
-#btn-reader-back {
-  left: max(8px, var(--sal));
-}
-
-#btn-reader-restart {
-  right: max(8px, var(--sar));
-}
-
-#btn-reader-back:active,
-#btn-reader-restart:active {
+#btn-reader-back:active {
   transform: scale(0.94);
   background: rgba(15, 23, 42, 0.95);
 }
 
-#btn-reader-back svg,
-#btn-reader-restart svg {
+#btn-reader-back svg {
   width: 12px;
   height: 12px;
   fill: currentColor;
 }
 
 /* Ensure 44x44pt tap target for iPhone touch accessibility without visual clutter */
-#btn-reader-back::before,
-#btn-reader-restart::before {
+#btn-reader-back::before {
   content: '';
   position: absolute;
   top: -9px;

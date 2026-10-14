@@ -56,7 +56,6 @@ const elements = {
 
   // Reader Controls
   btnReaderBack: document.getElementById('btn-reader-back'),
-  btnReaderRestart: document.getElementById('btn-reader-restart'),
   readerTitle: document.getElementById('reader-title'),
   testIframe: document.getElementById('test-iframe'),
 
@@ -1578,29 +1577,6 @@ async function initApp() {
       activeTestId = null;
       switchView('library');
       await refreshLibrary();
-    }
-  });
-
-  elements.btnReaderRestart.addEventListener('click', async () => {
-    const confirmed = await showModal({
-      title: 'Restart test?',
-      body: 'This will reset your current timer and answers for this session. Are you sure?',
-      buttons: [
-        { text: 'Restart test', className: 'btn-danger', value: true },
-        { text: 'Cancel', className: 'btn-secondary', value: false }
-      ]
-    });
-
-    if (confirmed && activeTestId) {
-      const test = await getTestById(activeTestId);
-      if (test) {
-        showToast('Restarting test...', 'warning');
-        // Clear srcdoc and re-apply patched HTML to guarantee a clean reset
-        elements.testIframe.srcdoc = '';
-        setTimeout(() => {
-          elements.testIframe.srcdoc = patchTestHtml(test.html);
-        }, 50);
-      }
     }
   });
 
