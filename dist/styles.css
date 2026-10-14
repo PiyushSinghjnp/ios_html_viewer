@@ -716,50 +716,80 @@ body.in-reader #main-header,
 }
 
 .reader-header {
-  flex-shrink: 0;
-  padding-top: max(var(--sat), 4px);
-  padding-bottom: 4px;
-  padding-left: max(8px, var(--sal));
-  padding-right: max(8px, var(--sar));
-  background-color: var(--bg-glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: calc(34px + max(var(--sat), 4px));
-  min-height: calc(34px + max(var(--sat), 4px));
-  box-sizing: border-box;
-  z-index: 25;
-}
-
-.reader-header .btn-secondary {
-  min-height: 28px;
-  height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  gap: 4px;
-}
-
-.reader-header .btn-secondary svg {
-  width: 13px;
-  height: 13px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+  z-index: 100;
 }
 
 .reader-title {
-  flex: 1;
-  font-size: 13px;
+  display: none !important;
+}
+
+#btn-reader-back,
+#btn-reader-restart {
+  pointer-events: auto;
+  position: absolute;
+  top: max(5px, var(--sat));
+  height: 26px;
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: center;
-  color: var(--text-primary);
-  padding: 0 4px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+#btn-reader-back {
+  left: max(8px, var(--sal));
+}
+
+#btn-reader-restart {
+  right: max(8px, var(--sar));
+}
+
+#btn-reader-back:active,
+#btn-reader-restart:active {
+  transform: scale(0.94);
+  background: rgba(15, 23, 42, 0.95);
+}
+
+#btn-reader-back svg,
+#btn-reader-restart svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+/* Ensure 44x44pt tap target for iPhone touch accessibility without visual clutter */
+#btn-reader-back::before,
+#btn-reader-restart::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  bottom: -9px;
+  left: -8px;
+  right: -8px;
 }
 
 .reader-iframe-container {

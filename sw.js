@@ -3,7 +3,7 @@
    Offline-first caching for iPhone 15 & Safari iOS 17+
    ========================================================================== */
 
-const CACHE_VERSION = 'v1.0.2';
+const CACHE_VERSION = 'v1.0.3';
 const SHELL_CACHE_NAME = `mock-tests-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE_NAME = `mock-tests-runtime-${CACHE_VERSION}`;
 
