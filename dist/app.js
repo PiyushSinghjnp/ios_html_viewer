@@ -255,9 +255,13 @@ export function closeSheet(sheetElement) {
    ========================================================================== */
 export function switchView(target) {
   if (target === 'reader') {
+    document.body.classList.add('in-reader');
+    if (elements.mainHeader) elements.mainHeader.classList.add('hidden');
     elements.viewLibrary.classList.remove('active');
     elements.viewReader.classList.add('active');
   } else {
+    document.body.classList.remove('in-reader');
+    if (elements.mainHeader) elements.mainHeader.classList.remove('hidden');
     elements.viewReader.classList.remove('active');
     elements.viewLibrary.classList.add('active');
   }
@@ -282,10 +286,145 @@ export function patchTestHtml(originalHtml) {
       width: auto !important;
       box-sizing: border-box !important;
     }
-    /* Smooth iOS scrolling */
+    /* Smooth iOS scrolling & strict height locking */
     html, body {
+      height: 100% !important;
+      max-height: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
       -webkit-overflow-scrolling: touch !important;
       overscroll-behavior-y: contain !important;
+    }
+    #app {
+      height: 100% !important;
+      max-height: 100% !important;
+      width: 100% !important;
+      position: absolute !important;
+      inset: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+    }
+    .th {
+      flex-shrink: 0 !important;
+      height: 38px !important;
+      min-height: 38px !important;
+      padding: 0 10px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+    }
+    .ht {
+      font-size: 13px !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+    .hl img {
+      width: 75px !important;
+      height: auto !important;
+    }
+    #mc {
+      flex: 1 1 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: 100% !important;
+      width: 100% !important;
+      display: flex !important;
+      overflow: hidden !important;
+      position: relative !important;
+    }
+    #left-panel {
+      flex: 1 1 0 !important;
+      height: 100% !important;
+      min-height: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      width: 100% !important;
+    }
+    #slim-header {
+      flex-shrink: 0 !important;
+      min-height: 34px !important;
+      height: auto !important;
+      padding: 6px 12px !important;
+    }
+    #qop-container {
+      flex: 1 1 0 !important;
+      min-height: 0 !important;
+      height: auto !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+    }
+    .split-left {
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      box-sizing: border-box !important;
+    }
+    .split-mid {
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      box-sizing: border-box !important;
+    }
+    .bar {
+      flex-shrink: 0 !important;
+      min-height: 48px !important;
+      height: auto !important;
+      z-index: 25 !important;
+      background: #f9f9f9 !important;
+      border-top: 1px solid #e0e0e0 !important;
+      padding: 6px 10px !important;
+      padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+    }
+    @media (max-width: 768px) {
+      .th {
+        height: 32px !important;
+        min-height: 32px !important;
+        padding: 0 8px !important;
+        justify-content: center !important;
+      }
+      .header-title-container { display: none !important; }
+      .fb { display: none !important; }
+      .bar {
+        padding: 6px 8px !important;
+        gap: 4px !important;
+        flex-direction: column !important;
+      }
+      #aBL, #aBR {
+        width: 100% !important;
+        display: flex !important;
+        gap: 5px !important;
+        justify-content: space-between !important;
+      }
+      .ob {
+        padding: 7px 4px !important;
+        font-size: 11.5px !important;
+      }
+      #qop-container {
+        display: block !important;
+        overflow-y: auto !important;
+      }
+      .split-left {
+        max-width: 100% !important;
+        width: 100% !important;
+        flex: none !important;
+        border-right: none !important;
+        border-bottom: 2px dashed #cbd5e1 !important;
+        padding: 10px 12px !important;
+        overflow-y: visible !important;
+      }
+      .split-mid {
+        max-width: 100% !important;
+        width: 100% !important;
+        flex: none !important;
+        padding: 10px 12px !important;
+        overflow-y: visible !important;
+      }
     }
   </style>
   <script id="viewer-patch-scripts">

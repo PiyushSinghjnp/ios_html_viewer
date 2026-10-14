@@ -197,6 +197,11 @@ input, textarea, select, button {
   z-index: 20;
 }
 
+body.in-reader #main-header,
+#main-header.hidden {
+  display: none !important;
+}
+
 .header-row {
   display: flex;
   align-items: center;
@@ -693,17 +698,17 @@ input, textarea, select, button {
   background-color: var(--danger-glow);
 }
 
-/* Reader View (Phase 3 Ready) */
+/* Reader View */
 #view-reader {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  background-color: var(--bg-primary);
-  z-index: 50;
-  display: none;
-  flex-direction: column;
   width: 100%;
   height: 100dvh;
-  min-height: 0;
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+  overflow: hidden;
 }
 
 #view-reader.active {
@@ -712,10 +717,10 @@ input, textarea, select, button {
 
 .reader-header {
   flex-shrink: 0;
-  padding-top: max(var(--sat), 8px);
-  padding-bottom: 8px;
-  padding-left: max(12px, var(--sal));
-  padding-right: max(12px, var(--sar));
+  padding-top: max(var(--sat), 4px);
+  padding-bottom: 4px;
+  padding-left: max(8px, var(--sal));
+  padding-right: max(8px, var(--sar));
   background-color: var(--bg-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -723,21 +728,38 @@ input, textarea, select, button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  height: calc(44px + max(var(--sat), 8px));
-  box-sizing: content-box;
+  gap: 8px;
+  height: calc(34px + max(var(--sat), 4px));
+  min-height: calc(34px + max(var(--sat), 4px));
+  box-sizing: border-box;
+  z-index: 25;
+}
+
+.reader-header .btn-secondary {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.reader-header .btn-secondary svg {
+  width: 13px;
+  height: 13px;
 }
 
 .reader-title {
   flex: 1;
-  font-size: 14.5px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
   color: var(--text-primary);
-  padding: 0 6px;
+  padding: 0 4px;
 }
 
 .reader-iframe-container {
@@ -747,6 +769,7 @@ input, textarea, select, button {
   min-height: 0; /* CRITICAL: Enables smooth internal flex scrolling */
   position: relative;
   background-color: #ffffff;
+  overflow: hidden;
 }
 
 #test-iframe {
