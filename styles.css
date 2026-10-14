@@ -440,24 +440,28 @@ input, textarea, select, button {
 
 .search-clear-btn {
   position: absolute;
-  right: 6px;
-  width: 32px;
-  height: 32px;
+  right: 2px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 50%;
   background: none;
   border: none;
   color: var(--text-tertiary);
+  font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .sort-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   padding: 0 4px;
 }
@@ -467,9 +471,26 @@ input, textarea, select, button {
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 13px;
+  padding: 8px 12px;
+  font-size: 16px; /* Prevents Safari auto-zoom */
+  min-height: 44px; /* iPhone 44pt tap target */
   outline: none;
+}
+
+.search-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 16px;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.search-empty-state p {
+  font-size: 15px;
+  color: var(--text-secondary);
 }
 
 /* Empty State */
@@ -623,23 +644,35 @@ input, textarea, select, button {
 }
 
 .test-action-btn {
-  height: 36px;
-  padding: 0 12px;
+  min-height: 44px; /* iPhone 44pt tap target */
+  min-width: 44px;
+  padding: 0 14px;
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .test-action-btn:active {
   background-color: var(--border-color);
   color: var(--text-primary);
+}
+
+.test-action-btn.delete-btn {
+  color: var(--danger);
+}
+
+.test-action-btn.delete-btn:active {
+  background-color: var(--danger-glow);
 }
 
 /* Reader View (Phase 3 Ready) */
@@ -859,7 +892,7 @@ input, textarea, select, button {
   min-height: 120px;
   resize: vertical;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 16px; /* Prevents Safari auto-zoom */
 }
 
 .form-checkbox-label {
@@ -870,6 +903,8 @@ input, textarea, select, button {
   color: var(--text-primary);
   cursor: pointer;
   margin-top: 6px;
+  min-height: 44px; /* iPhone 44pt tap target */
+  -webkit-tap-highlight-color: transparent;
 }
 
 .form-checkbox {

@@ -79,6 +79,10 @@ const elements = {
 let currentTests = [];
 let activeTestId = null;
 let wakeLockSentinel = null;
+let searchQuery = '';
+let sortPreference = localStorage.getItem('mocktest_sort_pref') || 'recent';
+let isDeleteInProgress = false;
+let currentModalResolver = null;
 
 /* ==========================================================================
    Theme Management (Light / Dark / Auto)
@@ -175,10 +179,18 @@ export function showToast(message, type = 'info', duration = 3000) {
    In-App Modal Dialog System (Replacing alert/confirm/prompt)
    ========================================================================== */
 export function showModal({ title, body, buttons = [] }) {
+  if (currentModalResolver) {
+    currentModalResolver(null);
+    currentModalResolver = null;
+  }
+
   return new Promise((resolve) => {
+    currentModalResolver = resolve;
+
     elements.modalTitle.textContent = title;
-    elements.modalBody.innerHTML = typeof body === 'string' ? body : '';
-    if (typeof body !== 'string' && body instanceof HTMLElement) {
+    if (typeof body === 'string') {
+      elements.modalBody.innerHTML = body;
+    } else if (body instanceof HTMLElement) {
       elements.modalBody.innerHTML = '';
       elements.modalBody.appendChild(body);
     }
@@ -190,9 +202,14 @@ export function showModal({ title, body, buttons = [] }) {
       btn.type = 'button';
       btn.className = btnConfig.className || 'btn-secondary';
       btn.textContent = btnConfig.text;
-      btn.addEventListener('click', () => {
-        closeModal();
-        resolve(btnConfig.value !== undefined ? btnConfig.value : btnConfig.text);
+      if (btnConfig.id) btn.id = btnConfig.id;
+      btn.addEventListener('click', async () => {
+        if (typeof btnConfig.onClick === 'function') {
+          const proceed = await btnConfig.onClick();
+          if (proceed === false) return;
+        }
+        const val = btnConfig.value !== undefined ? btnConfig.value : btnConfig.text;
+        closeModal(val);
       });
       elements.modalActions.appendChild(btn);
     });
@@ -202,9 +219,14 @@ export function showModal({ title, body, buttons = [] }) {
   });
 }
 
-export function closeModal() {
+export function closeModal(resolutionValue = null) {
   elements.modalContainer.classList.remove('active');
   elements.modalContainer.setAttribute('aria-hidden', 'true');
+  if (currentModalResolver) {
+    const res = currentModalResolver;
+    currentModalResolver = null;
+    res(resolutionValue);
+  }
 }
 
 /* ==========================================================================
@@ -518,13 +540,13 @@ function formatDate(timestamp) {
 
 function getAttemptStatus(testName) {
   const keySuffix = testName.replace(/\s+/g, '_');
-  const hasCompleted = localStorage.getItem(`MM_${keySuffix}`) !== null;
-  const hasInProg = localStorage.getItem(`MM_InProg_${keySuffix}`) !== null;
+  const hasCompleted = localStorage.getItem(`MM_${keySuffix}`) !== null || localStorage.getItem(`MM_${testName}`) !== null;
+  const hasInProg = localStorage.getItem(`MM_InProg_${keySuffix}`) !== null || localStorage.getItem(`MM_InProg_${testName}`) !== null;
 
   if (hasCompleted) {
     return {
       statusClass: 'attempted',
-      label: 'Completed',
+      label: 'Completed attempt',
       iconSvg: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>'
     };
   }
@@ -532,7 +554,7 @@ function getAttemptStatus(testName) {
   if (hasInProg) {
     return {
       statusClass: 'in-progress',
-      label: 'In Progress',
+      label: 'In-progress attempt',
       iconSvg: '<svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z"/></svg>'
     };
   }
@@ -544,6 +566,139 @@ function getAttemptStatus(testName) {
   };
 }
 
+/* ==========================================================================
+   Test Management (Rename & Delete with History Cleanup)
+   ========================================================================== */
+async function promptRenameTest(test) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'form-group';
+  wrapper.style.margin = '4px 0 0';
+
+  const label = document.createElement('label');
+  label.className = 'form-label';
+  label.textContent = 'Enter new test title';
+  label.htmlFor = 'modal-rename-input';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'modal-rename-input';
+  input.className = 'form-input';
+  input.value = test.name;
+  input.autocomplete = 'off';
+  input.autocapitalize = 'sentences';
+  input.style.fontSize = '16px'; // Prevents Safari auto-zoom
+
+  wrapper.appendChild(label);
+  wrapper.appendChild(input);
+
+  let submittedName = null;
+
+  const result = await showModal({
+    title: 'Rename test',
+    body: wrapper,
+    buttons: [
+      {
+        text: 'Save name',
+        className: 'btn-primary',
+        onClick: () => {
+          const val = input.value.trim();
+          if (!val) {
+            showToast('Please enter a test title.', 'warning');
+            input.focus();
+            return false;
+          }
+          submittedName = val;
+          return true;
+        },
+        value: true
+      },
+      { text: 'Cancel', className: 'btn-secondary', value: false }
+    ]
+  });
+
+  if (result && submittedName && submittedName !== test.name) {
+    try {
+      await renameTest(test.id, submittedName);
+      showToast(`Renamed to "${submittedName}"`, 'success');
+      await refreshLibrary();
+    } catch (err) {
+      console.error('[Rename] Error:', err);
+      showToast(`Failed to rename test: ${err.message}`, 'error');
+    }
+  }
+}
+
+async function promptDeleteTest(test) {
+  if (isDeleteInProgress) return;
+
+  const wrapper = document.createElement('div');
+  
+  const desc = document.createElement('p');
+  desc.style.marginBottom = '14px';
+  desc.style.fontSize = '14.5px';
+  desc.style.lineHeight = '1.45';
+  desc.textContent = `Are you sure you want to delete "${test.name}"? This test file will be removed from your device.`;
+
+  const label = document.createElement('label');
+  label.className = 'form-checkbox-label';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = 'delete-history-checkbox';
+  checkbox.className = 'form-checkbox';
+  checkbox.checked = false; // Default: keep history
+
+  const span = document.createElement('span');
+  span.textContent = 'Also delete attempt history & progress for this test';
+
+  label.appendChild(checkbox);
+  label.appendChild(span);
+
+  wrapper.appendChild(desc);
+  wrapper.appendChild(label);
+
+  const confirmed = await showModal({
+    title: 'Delete test?',
+    body: wrapper,
+    buttons: [
+      { text: 'Delete test', className: 'btn-danger', value: true },
+      { text: 'Cancel', className: 'btn-secondary', value: false }
+    ]
+  });
+
+  if (!confirmed) return;
+
+  if (isDeleteInProgress) return;
+  isDeleteInProgress = true;
+
+  try {
+    if (checkbox.checked) {
+      const keySuffix = test.name.replace(/\s+/g, '_');
+      localStorage.removeItem(`MM_${keySuffix}`);
+      localStorage.removeItem(`MM_InProg_${keySuffix}`);
+      localStorage.removeItem(`MM_${test.name}`);
+      localStorage.removeItem(`MM_InProg_${test.name}`);
+      
+      // Also clean any keys starting with MM_ that match this title
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith(`MM_${keySuffix}`) || k.startsWith(`MM_InProg_${keySuffix}`) || k.startsWith(`MM_${test.name}`))) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+
+    await deleteTest(test.id);
+    showToast(`Deleted "${test.name}"`, 'info');
+    await refreshLibrary();
+  } catch (err) {
+    console.error('[Delete] Error:', err);
+    showToast(`Failed to delete test: ${err.message}`, 'error');
+  } finally {
+    isDeleteInProgress = false;
+  }
+}
+
 export async function refreshLibrary() {
   currentTests = await getAllTests();
   renderLibrary();
@@ -551,10 +706,10 @@ export async function refreshLibrary() {
 }
 
 function renderLibrary() {
-  const count = currentTests.length;
-  elements.testCountLabel.textContent = `${count} ${count === 1 ? 'test' : 'tests'}`;
+  const totalCount = currentTests.length;
+  elements.testCountLabel.textContent = `${totalCount} ${totalCount === 1 ? 'test' : 'tests'}`;
 
-  if (count === 0) {
+  if (totalCount === 0) {
     elements.emptyState.classList.remove('hidden');
     elements.testList.classList.add('hidden');
     elements.libraryControls.classList.add('hidden');
@@ -565,15 +720,62 @@ function renderLibrary() {
   elements.emptyState.classList.add('hidden');
   elements.testList.classList.remove('hidden');
 
-  if (count >= 6) {
+  // Show search & sort controls when 6+ tests exist
+  if (totalCount >= 6) {
     elements.libraryControls.classList.remove('hidden');
   } else {
     elements.libraryControls.classList.add('hidden');
   }
 
+  // Filter tests by search query
+  let filtered = [...currentTests];
+  if (searchQuery) {
+    filtered = filtered.filter(test => test.name.toLowerCase().includes(searchQuery));
+    elements.testCountLabel.textContent = `${filtered.length} of ${totalCount} ${totalCount === 1 ? 'test' : 'tests'}`;
+  }
+
+  // Sort tests
+  filtered.sort((a, b) => {
+    switch (sortPreference) {
+      case 'added':
+        return (b.added || 0) - (a.added || 0);
+      case 'name':
+        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      case 'size':
+        return (b.size || 0) - (a.size || 0);
+      case 'recent':
+      default: {
+        const aOpen = a.lastOpened || 0;
+        const bOpen = b.lastOpened || 0;
+        if (aOpen !== bOpen) return bOpen - aOpen;
+        return (b.added || 0) - (a.added || 0);
+      }
+    }
+  });
+
   elements.testList.innerHTML = '';
 
-  currentTests.forEach((test) => {
+  if (filtered.length === 0) {
+    const emptySearch = document.createElement('div');
+    emptySearch.className = 'search-empty-state';
+    emptySearch.innerHTML = `
+      <p>No tests matching "<strong>${escapeHtml(searchQuery)}</strong>"</p>
+      <button type="button" class="btn-secondary" id="btn-search-empty-clear" style="min-height: 44px; min-width: 120px;">
+        <span>Clear search</span>
+      </button>
+    `;
+    emptySearch.querySelector('#btn-search-empty-clear').addEventListener('click', () => {
+      elements.inputSearch.value = '';
+      searchQuery = '';
+      elements.btnClearSearch.classList.add('hidden');
+      renderLibrary();
+      elements.inputSearch.focus();
+    });
+    elements.testList.appendChild(emptySearch);
+    return;
+  }
+
+  filtered.forEach((test) => {
     const card = document.createElement('article');
     card.className = 'test-card';
     card.tabIndex = 0;
@@ -609,9 +811,38 @@ function renderLibrary() {
           <span>${test.lastOpened ? `Opened ${formatRelativeDate(test.lastOpened)}` : 'Never opened'}</span>
         </div>
       </div>
+      <div class="test-card-actions">
+        <button type="button" class="test-action-btn btn-card-rename" aria-label="Rename ${escapeHtml(test.name)}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+          </svg>
+          <span>Rename</span>
+        </button>
+        <button type="button" class="test-action-btn delete-btn btn-card-delete" aria-label="Delete ${escapeHtml(test.name)}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+          </svg>
+          <span>Delete</span>
+        </button>
+      </div>
     `;
 
+    // Click card body to open in reader
     card.addEventListener('click', () => openTestInReader(test.id));
+
+    // Rename button
+    const btnRename = card.querySelector('.btn-card-rename');
+    btnRename.addEventListener('click', (e) => {
+      e.stopPropagation();
+      promptRenameTest(test);
+    });
+
+    // Delete button
+    const btnDelete = card.querySelector('.btn-card-delete');
+    btnDelete.addEventListener('click', (e) => {
+      e.stopPropagation();
+      promptDeleteTest(test);
+    });
 
     elements.testList.appendChild(card);
   });
@@ -727,6 +958,38 @@ async function initApp() {
   elements.modalContainer.addEventListener('click', (e) => {
     if (e.target === elements.modalContainer) closeModal();
   });
+
+  // 3b. Library Search and Sort Controls
+  if (elements.selectSort) {
+    elements.selectSort.value = sortPreference;
+    elements.selectSort.addEventListener('change', (e) => {
+      sortPreference = e.target.value;
+      localStorage.setItem('mocktest_sort_pref', sortPreference);
+      renderLibrary();
+    });
+  }
+
+  if (elements.inputSearch) {
+    elements.inputSearch.addEventListener('input', (e) => {
+      searchQuery = e.target.value.trim().toLowerCase();
+      if (searchQuery.length > 0) {
+        elements.btnClearSearch.classList.remove('hidden');
+      } else {
+        elements.btnClearSearch.classList.add('hidden');
+      }
+      renderLibrary();
+    });
+  }
+
+  if (elements.btnClearSearch) {
+    elements.btnClearSearch.addEventListener('click', () => {
+      elements.inputSearch.value = '';
+      searchQuery = '';
+      elements.btnClearSearch.classList.add('hidden');
+      renderLibrary();
+      elements.inputSearch.focus();
+    });
+  }
 
   // 4. Reader Navigation Controls
   elements.btnReaderBack.addEventListener('click', async () => {
