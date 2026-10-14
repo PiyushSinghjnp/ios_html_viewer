@@ -12,6 +12,7 @@ import {
   deleteTest,
   renameTest,
   updateTestLastOpened,
+  clearAllTests,
   getStorageStats,
   formatBytes,
   isStoragePersisted
@@ -887,6 +888,194 @@ export async function openTestInReader(testId) {
 }
 
 /* ==========================================================================
+   Backup & Restore (JSON Export / Import of Tests + MM_ LocalStorage Keys)
+   ========================================================================== */
+async function exportBackup() {
+  try {
+    const tests = await getAllTests();
+    const history = {};
+
+    // Collect all localStorage keys starting with "MM_" (attempt history + resume state)
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('MM_')) {
+        history[key] = localStorage.getItem(key);
+      }
+    }
+
+    const backupData = {
+      version: 1,
+      app: 'Mock Test Viewer',
+      exportedAt: new Date().toISOString(),
+      testsCount: tests.length,
+      historyCount: Object.keys(history).length,
+      tests,
+      history
+    };
+
+    const jsonStr = JSON.stringify(backupData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `mock_tests_backup_${dateStr}.json`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Exported ${tests.length} tests and ${Object.keys(history).length} history records`, 'success');
+  } catch (err) {
+    console.error('[Backup] Export error:', err);
+    showToast(`Failed to export backup: ${err.message}`, 'error');
+  }
+}
+
+async function handleBackupFile(file) {
+  if (!file) return;
+
+  try {
+    let text = await file.text();
+    // Strip UTF-8 BOM if present
+    if (text.charCodeAt(0) === 0xFEFF) {
+      text = text.slice(1);
+    }
+
+    let backupData;
+    try {
+      backupData = JSON.parse(text);
+    } catch {
+      showToast('Invalid backup file. JSON parsing failed.', 'error');
+      return;
+    }
+
+    if (!backupData || typeof backupData !== 'object') {
+      showToast('Corrupted or invalid backup file format.', 'error');
+      return;
+    }
+
+    const incomingTests = Array.isArray(backupData.tests) ? backupData.tests : [];
+    const incomingHistory = (typeof backupData.history === 'object' && backupData.history !== null) ? backupData.history : {};
+    const historyKeysCount = Object.keys(incomingHistory).length;
+
+    if (incomingTests.length === 0 && historyKeysCount === 0) {
+      showToast('This backup file contains no tests or history records.', 'warning');
+      return;
+    }
+
+    // Modal with Merge / Replace choice
+    const modalBody = document.createElement('div');
+    modalBody.innerHTML = `
+      <p style="margin-bottom: 12px; font-size: 14.5px; line-height: 1.45;">
+        Found <strong>${incomingTests.length}</strong> ${incomingTests.length === 1 ? 'test' : 'tests'} and <strong>${historyKeysCount}</strong> attempt history/progress ${historyKeysCount === 1 ? 'record' : 'records'} in this backup.
+      </p>
+      <div style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin-bottom: 6px;">
+        <p style="margin-bottom: 6px;"><strong>Merge:</strong> Add new tests and overwrite existing tests with matching names. Retain other existing tests and merge history.</p>
+        <p><strong>Replace all:</strong> Delete all current tests and wipe previous attempt history before restoring this backup.</p>
+      </div>
+    `;
+
+    const choice = await showModal({
+      title: 'Restore backup',
+      body: modalBody,
+      buttons: [
+        { text: 'Merge', className: 'btn-primary', value: 'merge' },
+        { text: 'Replace all', className: 'btn-danger', value: 'replace' },
+        { text: 'Cancel', className: 'btn-secondary', value: 'cancel' }
+      ]
+    });
+
+    if (!choice || choice === 'cancel') {
+      return;
+    }
+
+    if (choice === 'replace') {
+      // 1. Clear current IndexedDB tests
+      await clearAllTests();
+
+      // 2. Clear current MM_ localStorage keys
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('MM_')) {
+          localStorage.removeItem(key);
+        }
+      }
+
+      // 3. Save incoming tests
+      for (const t of incomingTests) {
+        if (!t.name || !t.html) continue;
+        await saveTest({
+          name: t.name,
+          html: t.html,
+          size: t.size || new Blob([t.html]).size,
+          added: t.added || Date.now(),
+          lastOpened: t.lastOpened || 0
+        });
+      }
+
+      // 4. Restore incoming history keys
+      for (const [k, v] of Object.entries(incomingHistory)) {
+        if (k.startsWith('MM_')) {
+          localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+        }
+      }
+    } else if (choice === 'merge') {
+      // 1. Merge tests
+      for (const t of incomingTests) {
+        if (!t.name || !t.html) continue;
+        const existing = await getTestByName(t.name);
+        if (existing) {
+          existing.html = t.html;
+          existing.size = t.size || new Blob([t.html]).size;
+          if (t.lastOpened && t.lastOpened > (existing.lastOpened || 0)) {
+            existing.lastOpened = t.lastOpened;
+          }
+          await saveTest(existing);
+        } else {
+          await saveTest({
+            name: t.name,
+            html: t.html,
+            size: t.size || new Blob([t.html]).size,
+            added: t.added || Date.now(),
+            lastOpened: t.lastOpened || 0
+          });
+        }
+      }
+
+      // 2. Merge history keys
+      for (const [k, v] of Object.entries(incomingHistory)) {
+        if (k.startsWith('MM_')) {
+          localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+        }
+      }
+    }
+
+    // Refresh UI and stats
+    await refreshLibrary();
+    await updateSettingsStats();
+
+    // Show confirmation modal
+    await showModal({
+      title: 'Restore complete',
+      body: `Successfully restored ${incomingTests.length} tests and ${historyKeysCount} history records (${choice === 'replace' ? 'replaced all previous data' : 'merged with existing data'}).`,
+      buttons: [
+        { text: 'Done', className: 'btn-primary', value: true }
+      ]
+    });
+
+    showToast(`Restored ${incomingTests.length} tests and ${historyKeysCount} history records`, 'success');
+  } catch (err) {
+    console.error('[Backup] Import error:', err);
+    showToast(`Restore failed: ${err.message}`, 'error');
+  } finally {
+    elements.backupFilePicker.value = '';
+  }
+}
+
+/* ==========================================================================
    Settings & Storage Stats
    ========================================================================== */
 async function updateSettingsStats() {
@@ -927,6 +1116,21 @@ async function initApp() {
     openSheet(elements.sheetSettings);
   });
   elements.btnCloseSettingsSheet.addEventListener('click', () => closeSheet(elements.sheetSettings));
+
+  // Backup & Restore
+  if (elements.btnExportBackup) {
+    elements.btnExportBackup.addEventListener('click', exportBackup);
+  }
+  if (elements.btnImportBackup) {
+    elements.btnImportBackup.addEventListener('click', () => elements.backupFilePicker.click());
+  }
+  if (elements.backupFilePicker) {
+    elements.backupFilePicker.addEventListener('change', async (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        await handleBackupFile(e.target.files[0]);
+      }
+    });
+  }
 
   // 3. Import Sheet & Trigger Actions
   elements.btnAddTest.addEventListener('click', () => openSheet(elements.sheetImport));

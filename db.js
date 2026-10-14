@@ -252,6 +252,31 @@ export function deleteTest(id) {
 }
 
 /**
+ * Clear all test records (used for restore in replace mode)
+ * @returns {Promise<void>}
+ */
+export function clearAllTests() {
+  return new Promise((resolve, reject) => {
+    if (isMemoryFallback || !dbInstance) {
+      memoryStore.clear();
+      resolve();
+      return;
+    }
+
+    try {
+      const transaction = dbInstance.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = (e) => reject(e.target.error);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
  * Update the lastOpened timestamp of a test
  * @param {string} id
  * @returns {Promise<void>}
