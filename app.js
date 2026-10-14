@@ -45,9 +45,14 @@ const elements = {
   settingsTestCount: document.getElementById('settings-test-count'),
   settingsStorageSize: document.getElementById('settings-storage-size'),
   settingsPersistStatus: document.getElementById('settings-persist-status'),
+  settingsOfflineStatus: document.getElementById('settings-offline-status'),
   btnExportBackup: document.getElementById('btn-export-backup'),
   btnImportBackup: document.getElementById('btn-import-backup'),
   backupFilePicker: document.getElementById('backup-file-picker'),
+
+  // Offline status badge
+  offlineBadge: document.getElementById('offline-badge'),
+  offlineStatusText: document.getElementById('offline-status-text'),
 
   // Reader Controls
   btnReaderBack: document.getElementById('btn-reader-back'),
@@ -1080,17 +1085,164 @@ async function handleBackupFile(file) {
    ========================================================================== */
 async function updateSettingsStats() {
   const stats = await getStorageStats();
-  elements.settingsTestCount.textContent = `${stats.count} ${stats.count === 1 ? 'test' : 'tests'}`;
-  elements.settingsStorageSize.textContent = stats.formattedSize;
+  if (elements.settingsTestCount) {
+    elements.settingsTestCount.textContent = `${stats.count} ${stats.count === 1 ? 'test' : 'tests'}`;
+  }
+  if (elements.settingsStorageSize) {
+    elements.settingsStorageSize.textContent = stats.formattedSize;
+  }
 
   const persisted = await isStoragePersisted();
-  if (persisted) {
-    elements.settingsPersistStatus.textContent = 'Active (Protected)';
-    elements.settingsPersistStatus.style.color = 'var(--success)';
-  } else {
-    elements.settingsPersistStatus.textContent = 'Standard';
-    elements.settingsPersistStatus.style.color = 'var(--text-secondary)';
+  if (elements.settingsPersistStatus) {
+    if (persisted) {
+      elements.settingsPersistStatus.textContent = 'Active (Protected)';
+      elements.settingsPersistStatus.style.color = 'var(--success)';
+    } else {
+      elements.settingsPersistStatus.textContent = 'Standard';
+      elements.settingsPersistStatus.style.color = 'var(--text-secondary)';
+    }
   }
+
+  if (elements.settingsOfflineStatus) {
+    const isCached = Boolean(navigator.serviceWorker && navigator.serviceWorker.controller);
+    if (!navigator.onLine) {
+      elements.settingsOfflineStatus.textContent = isCached ? 'Offline (Ready)' : 'Offline';
+      elements.settingsOfflineStatus.style.color = 'var(--warning)';
+    } else {
+      elements.settingsOfflineStatus.textContent = isCached ? 'Available offline (v1.0.0)' : 'Caching app shell...';
+      elements.settingsOfflineStatus.style.color = isCached ? 'var(--success)' : 'var(--text-secondary)';
+    }
+  }
+}
+
+/* ==========================================================================
+   Service Worker & Offline Management
+   ========================================================================== */
+
+/**
+ * Update the UI offline badges and settings indicator
+ * @param {boolean} isOnline
+ * @param {boolean} isCached
+ */
+function updateOfflineUI(isOnline, isCached) {
+  const badge = elements.offlineBadge;
+  const statusText = elements.offlineStatusText;
+  const settingsStatus = elements.settingsOfflineStatus;
+
+  if (!badge || !statusText) return;
+
+  if (!isOnline) {
+    badge.classList.remove('updating');
+    badge.classList.add('offline');
+    const text = isCached ? 'Offline (Ready)' : 'Offline';
+    statusText.textContent = text;
+    if (settingsStatus) {
+      settingsStatus.textContent = text;
+      settingsStatus.style.color = 'var(--warning)';
+    }
+  } else {
+    badge.classList.remove('offline', 'updating');
+    const text = isCached ? 'Available offline' : 'Ready';
+    statusText.textContent = text;
+    if (settingsStatus) {
+      settingsStatus.textContent = isCached ? 'Available offline (v1.0.0)' : 'Online only';
+      settingsStatus.style.color = isCached ? 'var(--success)' : 'var(--text-secondary)';
+    }
+  }
+}
+
+/**
+ * Register Service Worker for offline capability
+ */
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    console.warn('[SW] Service Workers not supported in this environment.');
+    updateOfflineUI(navigator.onLine, false);
+    return;
+  }
+
+  // Initial check: if already controlled, it's available offline
+  const isCurrentlyControlled = Boolean(navigator.serviceWorker.controller);
+  updateOfflineUI(navigator.onLine, isCurrentlyControlled);
+
+  try {
+    const registration = await navigator.serviceWorker.register('sw.js', { scope: './' });
+    console.log('[SW] ServiceWorker registered with scope:', registration.scope);
+
+    // If controller already present, we're active
+    if (navigator.serviceWorker.controller) {
+      updateOfflineUI(navigator.onLine, true);
+    }
+
+    registration.addEventListener('updatefound', () => {
+      const installing = registration.installing;
+      if (!installing) return;
+
+      if (elements.offlineBadge) {
+        elements.offlineBadge.classList.add('updating');
+      }
+      if (elements.offlineStatusText) {
+        elements.offlineStatusText.textContent = 'Updating...';
+      }
+
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed') {
+          if (navigator.serviceWorker.controller) {
+            showToast('New version ready for next visit', 'info');
+          } else {
+            showToast('App is ready for offline use', 'success');
+          }
+          updateOfflineUI(navigator.onLine, true);
+        }
+      });
+    });
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      console.log('[SW] Service Worker controller changed.');
+      updateOfflineUI(navigator.onLine, true);
+    });
+
+  } catch (err) {
+    console.warn('[SW] Registration failed:', err);
+    updateOfflineUI(navigator.onLine, false);
+  }
+}
+
+/**
+ * Setup online/offline event listeners and badge interactivity
+ */
+function initNetworkMonitoring() {
+  const checkStatus = () => {
+    const isOnline = navigator.onLine;
+    const isCached = Boolean(navigator.serviceWorker && navigator.serviceWorker.controller);
+    updateOfflineUI(isOnline, isCached);
+  };
+
+  window.addEventListener('online', () => {
+    checkStatus();
+    showToast('Internet connection restored', 'info');
+  });
+
+  window.addEventListener('offline', () => {
+    checkStatus();
+    showToast('Offline mode active. Saved tests work normally.', 'warning');
+  });
+
+  if (elements.offlineBadge) {
+    elements.offlineBadge.addEventListener('click', () => {
+      const isOnline = navigator.onLine;
+      const isCached = Boolean(navigator.serviceWorker && navigator.serviceWorker.controller);
+      if (!isOnline) {
+        showToast('You are offline. All saved tests and attempt history work on-device.', 'info');
+      } else if (isCached) {
+        showToast('App shell & test engines are cached. Ready for offline use.', 'success');
+      } else {
+        showToast('Connecting to network. Offline cache is initializing...', 'info');
+      }
+    });
+  }
+
+  checkStatus();
 }
 
 /* ==========================================================================
@@ -1276,7 +1428,11 @@ async function initApp() {
   // 7. Initial Load of Tests
   await refreshLibrary();
 
-  console.log('Mock Test Viewer Phase 3 loaded successfully.');
+  // 8. Service Worker & Offline Capability
+  initNetworkMonitoring();
+  await registerServiceWorker();
+
+  console.log('Mock Test Viewer initialized successfully with offline support.');
 }
 
 document.addEventListener('DOMContentLoaded', initApp);
