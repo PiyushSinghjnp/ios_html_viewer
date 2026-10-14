@@ -307,32 +307,40 @@ export function patchTestHtml(originalHtml) {
     }
     .th {
       flex-shrink: 0 !important;
-      height: calc(36px + max(0px, env(safe-area-inset-top, 0px))) !important;
-      min-height: 36px !important;
-      padding: 0 75px !important;
+      height: calc(44px + max(0px, env(safe-area-inset-top, 0px))) !important;
+      min-height: 44px !important;
+      padding: 0 60px !important;
       padding-top: env(safe-area-inset-top, 0px) !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
       position: relative !important;
       box-sizing: border-box !important;
+      background: var(--b, #3476bb) !important;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15) !important;
     }
-    .header-title-container { display: none !important; }
-    .fb { display: none !important; }
+    .header-title-container,
     .ht {
-      font-size: 13px !important;
-      white-space: nowrap !important;
-      overflow: hidden !important;
-      text-overflow: ellipsis !important;
+      display: none !important;
+    }
+    .fb {
+      display: none !important;
     }
     .hl {
+      position: static !important;
+      transform: none !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
+      margin: 0 auto !important;
+      pointer-events: none !important;
     }
     .hl img {
-      width: 75px !important;
-      height: auto !important;
+      width: auto !important;
+      max-width: 110px !important;
+      height: 22px !important;
+      object-fit: contain !important;
+      filter: invert(1) !important;
     }
     #mc {
       flex: 1 1 0 !important;
@@ -390,16 +398,174 @@ export function patchTestHtml(originalHtml) {
       align-items: center !important;
       justify-content: space-between !important;
     }
+
+    /* ==========================================================
+       Frosted Glass Modern Dynamic Pause Overlay
+       ========================================================== */
+    #pauseOverlay {
+      display: none;
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      background: radial-gradient(circle at center, rgba(15, 23, 42, 0.88), rgba(2, 6, 23, 0.96)) !important;
+      -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+      backdrop-filter: blur(24px) saturate(190%) !important;
+      z-index: 9999 !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex-direction: column !important;
+      padding: 20px !important;
+      box-sizing: border-box !important;
+      text-align: center !important;
+      animation: viewerOverlayFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    @keyframes viewerOverlayFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.97);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .pause-card {
+      background: rgba(30, 41, 59, 0.85) !important;
+      -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
+      backdrop-filter: blur(24px) saturate(200%) !important;
+      border: 1px solid rgba(255, 255, 255, 0.15) !important;
+      border-radius: 24px !important;
+      padding: 32px 24px !important;
+      max-width: 320px !important;
+      width: 88% !important;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      text-align: center !important;
+      box-sizing: border-box !important;
+      animation: pauseCardPop 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    @keyframes pauseCardPop {
+      0% {
+        opacity: 0;
+        transform: scale(0.92) translateY(10px);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    #pauseOverlay h1,
+    .pause-card h1 {
+      color: #ffffff !important;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif !important;
+      font-size: 26px !important;
+      font-weight: 800 !important;
+      letter-spacing: -0.4px !important;
+      margin: 0 0 10px 0 !important;
+      text-shadow: 0 2px 14px rgba(0, 0, 0, 0.4) !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 8px !important;
+    }
+
+    #pauseOverlay p,
+    .pause-card p {
+      color: #94a3b8 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif !important;
+      font-size: 15px !important;
+      font-weight: 500 !important;
+      line-height: 1.4 !important;
+      margin: 0 0 26px 0 !important;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+    }
+
+    #pauseOverlay button,
+    #pauseOverlay .ob,
+    #pauseOverlay .ob.bb,
+    .pause-card button,
+    .pause-card .ob,
+    .pause-card .ob.bb {
+      flex: 0 0 auto !important; /* CRITICAL: Overrides mobile .ob { flex: 1 } stretching */
+      width: auto !important;
+      min-width: 200px !important;
+      max-width: 260px !important;
+      height: 50px !important;
+      min-height: 50px !important;
+      max-height: 50px !important;
+      padding: 0 28px !important;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif !important;
+      font-size: 16px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.2px !important;
+      border-radius: 9999px !important;
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+      color: #ffffff !important;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      box-shadow: 0 10px 25px -4px rgba(37, 99, 235, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+      cursor: pointer !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 8px !important;
+      transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease, background 0.15s ease !important;
+      -webkit-tap-highlight-color: transparent !important;
+      outline: none !important;
+    }
+
+    #pauseOverlay button:hover,
+    #pauseOverlay .ob:hover,
+    .pause-card button:hover,
+    .pause-card .ob:hover {
+      background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%) !important;
+      box-shadow: 0 12px 30px -4px rgba(37, 99, 235, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+    }
+
+    #pauseOverlay button:active,
+    #pauseOverlay .ob:active,
+    .pause-card button:active,
+    .pause-card .ob:active {
+      transform: scale(0.96) !important;
+      background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4) !important;
+    }
+
+    /* Modal dialogs inside test */
+    #sysModal {
+      background: rgba(15, 23, 42, 0.75) !important;
+      -webkit-backdrop-filter: blur(12px) !important;
+      backdrop-filter: blur(12px) !important;
+    }
+    #sysModal > div {
+      max-width: 88vw !important;
+      box-sizing: border-box !important;
+      border-radius: 14px !important;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35) !important;
+    }
+
     @media (max-width: 768px) {
       .th {
-        height: calc(34px + max(0px, env(safe-area-inset-top, 0px))) !important;
-        min-height: 34px !important;
-        padding: 0 70px !important;
+        height: calc(44px + max(0px, env(safe-area-inset-top, 0px))) !important;
+        min-height: 44px !important;
+        padding: 0 60px !important;
         padding-top: env(safe-area-inset-top, 0px) !important;
         justify-content: center !important;
       }
-      .header-title-container { display: none !important; }
-      .fb { display: none !important; }
+      .header-title-container,
+      .ht {
+        display: none !important;
+      }
+      .fb {
+        display: none !important;
+      }
       .bar {
         padding: 6px 8px !important;
         gap: 4px !important;
@@ -414,6 +580,21 @@ export function patchTestHtml(originalHtml) {
       .ob {
         padding: 7px 4px !important;
         font-size: 11.5px !important;
+      }
+      /* Absolute guarantee against mobile button vertical stretch inside pauseOverlay */
+      #pauseOverlay button,
+      #pauseOverlay .ob,
+      #pauseOverlay .ob.bb,
+      .pause-card button,
+      .pause-card .ob,
+      .pause-card .ob.bb {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 200px !important;
+        max-width: 260px !important;
+        height: 50px !important;
+        min-height: 50px !important;
+        max-height: 50px !important;
       }
       #qop-container {
         display: block !important;
@@ -439,6 +620,39 @@ export function patchTestHtml(originalHtml) {
   </style>
   <script id="viewer-patch-scripts">
     (function() {
+      // Dynamic pause overlay enhancement
+      function enhancePauseOverlay() {
+        try {
+          var po = document.getElementById('pauseOverlay');
+          if (po && !po.querySelector('.pause-card')) {
+            var card = document.createElement('div');
+            card.className = 'pause-card';
+            while (po.firstChild) {
+              card.appendChild(po.firstChild);
+            }
+            po.appendChild(card);
+          }
+        } catch (e) {
+          console.warn('[Viewer Patch] enhancePauseOverlay notice:', e);
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', enhancePauseOverlay);
+      } else {
+        enhancePauseOverlay();
+      }
+
+      try {
+        var pauseObserver = new MutationObserver(function() {
+          var po = document.getElementById('pauseOverlay');
+          if (po && !po.querySelector('.pause-card') && po.childNodes.length > 0) {
+            enhancePauseOverlay();
+          }
+        });
+        pauseObserver.observe(document.documentElement, { childList: true, subtree: true });
+      } catch (err) {}
+
       // Stub documentElement.requestFullscreen for iPhone Safari
       if (!document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen = function() {
@@ -479,12 +693,14 @@ export function patchTestHtml(originalHtml) {
   <\/script>
   `;
 
-  // Inject right after <head> or <head ...>
-  if (/<head[^>]*>/i.test(originalHtml)) {
-    return originalHtml.replace(/(<head[^>]*>)/i, `$1\n${patchBlock}`);
+  // Inject right before </head> so that viewer-patch styles take cascade precedence
+  if (/<\/head>/i.test(originalHtml)) {
+    return originalHtml.replace(/(<\/head>)/i, `${patchBlock}\n$1`);
+  } else if (/<body[^>]*>/i.test(originalHtml)) {
+    return originalHtml.replace(/(<body[^>]*>)/i, `${patchBlock}\n$1`);
   }
 
-  // Fallback: prepend if no <head> tag exists
+  // Fallback: prepend if no tags exist
   return patchBlock + '\n' + originalHtml;
 }
 
