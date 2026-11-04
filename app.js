@@ -59,6 +59,13 @@ const elements = {
   readerTitle: document.getElementById('reader-title'),
   testIframe: document.getElementById('test-iframe'),
 
+  // Reader Toolbar
+  btnFontDecrease: document.getElementById('btn-font-decrease'),
+  btnFontIncrease: document.getElementById('btn-font-increase'),
+  btnAutoTheme: document.getElementById('btn-auto-theme'),
+  fontSizeLabel: document.getElementById('font-size-label'),
+  readerToolbar: document.getElementById('reader-toolbar'),
+
   // Sheets & Modals
   sheetImport: document.getElementById('sheet-import'),
   btnCloseImportSheet: document.getElementById('btn-close-import-sheet'),
@@ -90,6 +97,21 @@ let isDeleteInProgress = false;
 let isRenameInProgress = false;
 let isImportInProgress = false;
 let currentModalResolver = null;
+
+// Feature flags & settings
+let readerFontSize = parseInt(localStorage.getItem('mocktest_font_size') || '100', 10); // percentage 80-150
+let readerAutoTheme = localStorage.getItem('mocktest_auto_theme') !== 'false'; // enabled by default
+let readingProgressEnabled = localStorage.getItem('mocktest_reading_progress') !== 'false';
+
+// Swipe gesture tracking
+let swipeStartX = 0;
+let swipeStartY = 0;
+let isSwiping = false;
+
+// Pull-to-refresh tracking
+let pullStartY = 0;
+let isPulling = false;
+let pullDistance = 0;
 
 /* ==========================================================================
    Theme Management (Light / Dark / Auto)
@@ -162,6 +184,302 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
     applyTheme('auto');
   }
 });
+
+/* ==========================================================================
+   Font Size Control (Reader)
+   ========================================================================== */
+export function getReaderFontSize() {
+  return readerFontSize;
+}
+
+export function setReaderFontSize(size) {
+  readerFontSize = Math.max(80, Math.min(150, Math.round(size)));
+  localStorage.setItem('mocktest_font_size', String(readerFontSize));
+  applyReaderFontSize();
+  return readerFontSize;
+}
+
+function applyReaderFontSize() {
+  if (elements.testIframe && elements.testIframe.contentWindow) {
+    try {
+      const doc = elements.testIframe.contentDocument || elements.testIframe.contentWindow.document;
+      if (doc && doc.documentElement) {
+        doc.documentElement.style.setProperty('font-size', `${readerFontSize}%`, 'important');
+      }
+    } catch (e) {
+      // Cross-origin iframe, can't access
+    }
+  }
+}
+
+/* ==========================================================================
+   Auto Theme Detection from Test Content
+   ========================================================================== */
+function detectTestTheme(html) {
+  if (!html) return null;
+  // Check for dark background indicators in the HTML
+  const darkPatterns = [
+    /background[-#:]?\s*(?:#(?:[0-9a-f]{3}){1,2}\b|rgb\(?\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)?|(?:black|dark|navy|#0[0-9a-f]{5}|#1[0-9a-f]{5}|#2[0-2][0-9a-f]{4}))/i,
+    /body\s*\{[^}]*background[^}]*(?:#(?:[0-3][0-9a-f]{5}|[0-9a-f]{3}\b)|black|dark|navy)/i,
+    /<body[^>]*style\s*=\s*["'][^"']*background[^"']*(?:#(?:[0-3][0-9a-f]{5}|[0-9a-f]{3}\b)|black|dark|navy)/i,
+  ];
+  const lightPatterns = [
+    /background[-#:]?\s*(?:#(?:[d-f][0-9a-f]{5}|[e-f][0-9a-f]{5})|rgb\(?\s*2[0-5]{2}\s*,\s*2[0-5]{2}\s*,\s*2[0-5]{2}\s*\)?|(?:white|light|#f[0-9a-f]{5}|#fff))/i,
+    /body\s*\{[^}]*background[^}]*(?:#(?:[d-f][0-9a-f]{5}|[e-f][0-9a-f]{5})|white|light)/i,
+  ];
+
+  let darkScore = 0, lightScore = 0;
+  for (const p of darkPatterns) if (p.test(html)) darkScore++;
+  for (const p of lightPatterns) if (p.test(html)) lightScore++;
+
+  if (darkScore > lightScore) return 'dark';
+  if (lightScore > darkScore) return 'light';
+  return null;
+}
+
+function applyAutoThemeForTest(html) {
+  if (!readerAutoTheme) return;
+  const detected = detectTestTheme(html);
+  if (!detected) return;
+
+  const currentPref = getPreferredTheme();
+  if (currentPref === 'auto') {
+    // Temporarily override for this test session
+    const root = document.documentElement;
+    if (detected === 'dark') {
+      root.setAttribute('data-theme', 'dark');
+      elements.metaThemeColor.setAttribute('content', '#090d16');
+    } else {
+      root.setAttribute('data-theme', 'light');
+      elements.metaThemeColor.setAttribute('content', '#f8fafc');
+    }
+    updateThemeIcon('auto'); // Keep icon showing auto
+  }
+}
+
+function resetAutoTheme() {
+  if (!readerAutoTheme) return;
+  const currentPref = getPreferredTheme();
+  if (currentPref === 'auto') {
+    applyTheme('auto');
+  }
+}
+
+/* ==========================================================================
+   Reading Progress Indicator
+   ========================================================================== */
+let progressBar = null;
+
+function createProgressBar() {
+  if (progressBar) return progressBar;
+
+  progressBar = document.createElement('div');
+  progressBar.id = 'reading-progress-bar';
+  progressBar.setAttribute('role', 'progressbar');
+  progressBar.setAttribute('aria-valuemin', '0');
+  progressBar.setAttribute('aria-valuemax', '100');
+  progressBar.setAttribute('aria-label', 'Reading progress');
+  progressBar.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: var(--accent-gradient);
+    z-index: 1000;
+    transform-origin: left;
+    transform: scaleX(0);
+    transition: transform 0.15s linear, opacity 0.2s ease;
+    pointer-events: none;
+    opacity: 0;
+  `;
+  document.body.appendChild(progressBar);
+  return progressBar;
+}
+
+function updateReadingProgress() {
+  if (!readingProgressEnabled || !activeTestId) return;
+
+  const bar = createProgressBar();
+  if (!elements.testIframe || !elements.testIframe.contentWindow) return;
+
+  try {
+    const doc = elements.testIframe.contentDocument || elements.testIframe.contentWindow.document;
+    if (!doc) return;
+
+    const scrollTop = doc.documentElement.scrollTop || doc.body.scrollTop || 0;
+    const scrollHeight = doc.documentElement.scrollHeight || doc.body.scrollHeight || 1;
+    const clientHeight = doc.documentElement.clientHeight || window.innerHeight;
+    const progress = Math.max(0, Math.min(1, scrollTop / (scrollHeight - clientHeight)));
+
+    bar.style.transform = `scaleX(${progress})`;
+    bar.style.opacity = progress > 0 && progress < 1 ? '1' : '0';
+    bar.setAttribute('aria-valuenow', Math.round(progress * 100));
+  } catch (e) {
+    // Cross-origin, can't measure
+  }
+}
+
+function setupReadingProgressListener() {
+  if (!elements.testIframe) return;
+
+  // Use setInterval since we can't easily attach scroll listener to cross-origin iframe
+  // but we CAN access contentWindow for same-origin (which we have via allow-same-origin)
+  const intervalId = setInterval(() => {
+    if (!activeTestId) {
+      clearInterval(intervalId);
+      if (progressBar) {
+        progressBar.style.opacity = '0';
+        progressBar.style.transform = 'scaleX(0)';
+      }
+      return;
+    }
+    updateReadingProgress();
+  }, 100);
+
+  // Also listen for scroll events on the iframe's window if accessible
+  try {
+    const iframeWin = elements.testIframe.contentWindow;
+    if (iframeWin) {
+      iframeWin.addEventListener('scroll', updateReadingProgress, { passive: true });
+      // Store for cleanup
+      iframeWin._progressScrollHandler = updateReadingProgress;
+    }
+  } catch (e) {
+    // Can't attach, rely on interval
+  }
+}
+
+/* ==========================================================================
+   Swipe Gesture (Back from Reader)
+   ========================================================================== */
+function handleSwipeStart(e) {
+  if (!document.body.classList.contains('in-reader')) return;
+  const touch = e.touches[0];
+  swipeStartX = touch.clientX;
+  swipeStartY = touch.clientY;
+  isSwiping = true;
+}
+
+function handleSwipeMove(e) {
+  if (!isSwiping || !document.body.classList.contains('in-reader')) return;
+  const touch = e.touches[0];
+  const deltaX = touch.clientX - swipeStartX;
+  const deltaY = Math.abs(touch.clientY - swipeStartY);
+
+  // Horizontal swipe from left edge, mostly horizontal
+  if (swipeStartX < 30 && deltaX > 50 && deltaY < deltaX * 0.5) {
+    // Visual feedback: slight slide
+    elements.viewReader.style.transform = `translateX(${Math.min(deltaX, 100)}px)`;
+    elements.viewReader.style.transition = 'none';
+  }
+}
+
+function handleSwipeEnd() {
+  if (!isSwiping) return;
+  isSwiping = false;
+
+  const deltaX = swipeStartX > 0 ? 0 : 0; // We track from start
+  // Actually check the final position
+  if (elements.viewReader.style.transform) {
+    const transform = elements.viewReader.style.transform;
+    const match = transform.match(/translateX\(([\d.]+)px\)/);
+    if (match && parseFloat(match[1]) > 60) {
+      // Trigger back navigation
+      elements.btnReaderBack.click();
+    }
+    elements.viewReader.style.transform = '';
+    elements.viewReader.style.transition = 'transform 0.2s ease';
+  }
+}
+
+/* ==========================================================================
+   Pull-to-Refresh (Library)
+   ========================================================================== */
+let pullIndicator = null;
+
+function createPullIndicator() {
+  if (pullIndicator) return pullIndicator;
+
+  pullIndicator = document.createElement('div');
+  pullIndicator.id = 'pull-to-refresh-indicator';
+  pullIndicator.style.cssText = `
+    position: fixed;
+    top: -60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 40px;
+    border: 2px solid var(--accent-primary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    z-index: 100;
+    transition: top 0.2s ease, opacity 0.2s ease;
+    opacity: 0;
+    pointer-events: none;
+    animation: spin 1s linear infinite;
+  `;
+
+  // Add spin animation if not exists
+  if (!document.getElementById('pull-refresh-style')) {
+    const style = document.createElement('style');
+    style.id = 'pull-refresh-style';
+    style.textContent = `
+      @keyframes spin {
+        to { transform: translateX(-50%) rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  document.body.appendChild(pullIndicator);
+  return pullIndicator;
+}
+
+function handlePullStart(e) {
+  if (document.body.classList.contains('in-reader')) return;
+  if (elements.testList.scrollTop !== 0) return; // Only at top
+
+  const touch = e.touches[0];
+  pullStartY = touch.clientY;
+  isPulling = true;
+}
+
+function handlePullMove(e) {
+  if (!isPulling || document.body.classList.contains('in-reader')) return;
+  if (elements.testList.scrollTop !== 0) { isPulling = false; return; }
+
+  const touch = e.touches[0];
+  pullDistance = touch.clientY - pullStartY;
+
+  if (pullDistance > 0) {
+    const indicator = createPullIndicator();
+    const progress = Math.min(1, pullDistance / 100);
+    indicator.style.top = `${Math.min(pullDistance * 0.5, 30)}px`;
+    indicator.style.opacity = progress;
+    indicator.style.transform = `translateX(-50%) rotate(${pullDistance * 2}deg)`;
+    e.preventDefault(); // Prevent page overscroll
+  }
+}
+
+async function handlePullEnd() {
+  if (!isPulling) return;
+  isPulling = false;
+
+  const indicator = pullIndicator;
+  if (indicator) {
+    indicator.style.opacity = '0';
+    indicator.style.top = '-60px';
+  }
+
+  if (pullDistance > 80) {
+    // Trigger refresh
+    showToast('Refreshing library...', 'info');
+    await refreshLibrary();
+    showToast('Library updated', 'success');
+  }
+
+  pullDistance = 0;
+}
 
 /* ==========================================================================
    Toast Notification System
@@ -291,9 +609,21 @@ export function patchTestHtml(originalHtml) {
       max-height: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
-      overflow: hidden !important;
+      overflow: auto !important; /* Allow scrolling if content exceeds viewport */
       -webkit-overflow-scrolling: touch !important;
       overscroll-behavior-y: contain !important;
+    }
+    /* Generic responsive fallback: prevent any element from overflowing viewport */
+    img, video, iframe, table, pre, code, svg, canvas, object, embed {
+      max-width: 100% !important;
+      height: auto !important;
+      box-sizing: border-box !important;
+    }
+    /* Prevent horizontal overflow on flex/grid containers */
+    .container, .wrapper, .content, .main, [class*="container"], [class*="wrapper"], [class*="content"] {
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      overflow-x: hidden !important;
     }
     #app {
       height: 100% !important;
@@ -439,7 +769,7 @@ export function patchTestHtml(originalHtml) {
       border: 1px solid rgba(255, 255, 255, 0.15) !important;
       border-radius: 24px !important;
       padding: 32px 24px !important;
-      max-width: 320px !important;
+      max-width: 90vw !important; /* Responsive: adapt to viewport width */
       width: 88% !important;
       box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
       display: flex !important;
@@ -496,12 +826,12 @@ export function patchTestHtml(originalHtml) {
     .pause-card .ob.bb {
       flex: 0 0 auto !important; /* CRITICAL: Overrides mobile .ob { flex: 1 } stretching */
       width: auto !important;
-      min-width: 200px !important;
-      max-width: 260px !important;
+      min-width: 160px !important; /* Smaller minimum for narrow screens */
+      max-width: 90vw !important; /* Responsive max width */
       height: 50px !important;
       min-height: 50px !important;
       max-height: 50px !important;
-      padding: 0 28px !important;
+      padding: 0 24px !important;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif !important;
       font-size: 16px !important;
       font-weight: 700 !important;
@@ -590,8 +920,8 @@ export function patchTestHtml(originalHtml) {
       .pause-card .ob.bb {
         flex: 0 0 auto !important;
         width: auto !important;
-        min-width: 200px !important;
-        max-width: 260px !important;
+        min-width: 160px !important; /* Smaller minimum for narrow screens */
+        max-width: 90vw !important; /* Responsive max width */
         height: 50px !important;
         min-height: 50px !important;
         max-height: 50px !important;
@@ -1313,6 +1643,15 @@ export async function openTestInReader(testId) {
   const patchedHtml = patchTestHtml(test.html);
   elements.testIframe.srcdoc = patchedHtml;
 
+  // Apply font size setting
+  setTimeout(() => applyReaderFontSize(), 50);
+
+  // Auto-detect theme from test content
+  applyAutoThemeForTest(test.html);
+
+  // Setup reading progress indicator
+  setupReadingProgressListener();
+
   // Request screen wake lock
   await acquireWakeLock();
 
@@ -1795,6 +2134,65 @@ async function initApp() {
       await refreshLibrary();
     }
   });
+
+  // Font size controls
+  const updateFontSizeLabel = () => {
+    if (elements.fontSizeLabel) {
+      elements.fontSizeLabel.textContent = `${readerFontSize}%`;
+    }
+  };
+
+  elements.btnFontDecrease?.addEventListener('click', () => {
+    const newSize = setReaderFontSize(readerFontSize - 10);
+    updateFontSizeLabel();
+    showToast(`Font size: ${newSize}%`, 'info');
+  });
+
+  elements.btnFontIncrease?.addEventListener('click', () => {
+    const newSize = setReaderFontSize(readerFontSize + 10);
+    updateFontSizeLabel();
+    showToast(`Font size: ${newSize}%`, 'info');
+  });
+
+  // Auto theme toggle
+  elements.btnAutoTheme?.addEventListener('click', async () => {
+    readerAutoTheme = !readerAutoTheme;
+    localStorage.setItem('mocktest_auto_theme', String(readerAutoTheme));
+    elements.btnAutoTheme.classList.toggle('active', readerAutoTheme);
+    showToast(`Auto theme ${readerAutoTheme ? 'enabled' : 'disabled'}`, 'info');
+
+    // Apply immediately if in reader
+    if (activeTestId) {
+      const test = await getTestById(activeTestId);
+      if (test) {
+        if (readerAutoTheme) {
+          applyAutoThemeForTest(test.html);
+        } else {
+          resetAutoTheme();
+        }
+      }
+    }
+  });
+
+  // Initialize font size label
+  updateFontSizeLabel();
+
+  // Initialize auto theme button state
+  if (elements.btnAutoTheme) {
+    elements.btnAutoTheme.classList.toggle('active', readerAutoTheme);
+  }
+
+  // Swipe gesture (back from reader)
+  document.addEventListener('touchstart', handleSwipeStart, { passive: true });
+  document.addEventListener('touchmove', handleSwipeMove, { passive: false });
+  document.addEventListener('touchend', handleSwipeEnd, { passive: true });
+
+  // Pull-to-refresh (library)
+  if (elements.testList) {
+    elements.testList.addEventListener('touchstart', handlePullStart, { passive: true });
+    elements.testList.addEventListener('touchmove', handlePullMove, { passive: false });
+    elements.testList.addEventListener('touchend', handlePullEnd, { passive: true });
+  }
 
   // 5. Visibility & Safety Hooks (Progress saving & Wake Lock)
   document.addEventListener('visibilitychange', async () => {
